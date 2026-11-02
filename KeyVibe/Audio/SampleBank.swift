@@ -15,22 +15,37 @@ import os.log
 
 // MARK: - PCMBuffer
 
-/// Uncompressed, ready-to-stream 32-bit float PCM audio buffer.
-public struct PCMBuffer: Sendable {
-    /// Contiguous floating-point PCM samples (interleaved if stereo).
-    public let samples: [Float]
+/// Uncompressed, ready-to-stream 32-bit float PCM audio buffer with pinned memory.
+public final class PCMBuffer: @unchecked Sendable {
+    /// Pinned contiguous floating-point PCM samples (interleaved if stereo).
+    public let pointer: UnsafeMutablePointer<Float>
     /// Total audio frame count.
     public let frameCount: Int
     /// Number of channels (1 = mono, 2 = stereo).
     public let channelCount: Int
     /// Audio sample rate in Hz (typically 44,100).
     public let sampleRate: Double
+    /// Total sample floats allocated.
+    private let totalSamples: Int
 
     public init(samples: [Float], frameCount: Int, channelCount: Int = 1, sampleRate: Double = 44100.0) {
-        self.samples = samples
         self.frameCount = frameCount
         self.channelCount = channelCount
         self.sampleRate = sampleRate
+        self.totalSamples = frameCount * channelCount
+        let allocCount = max(1, totalSamples)
+        self.pointer = .allocate(capacity: allocCount)
+        if totalSamples > 0 && samples.count >= totalSamples {
+            self.pointer.initialize(from: samples, count: totalSamples)
+        } else if totalSamples > 0 {
+            self.pointer.initialize(repeating: 0.0, count: totalSamples)
+        }
+    }
+
+    deinit {
+        let allocCount = max(1, totalSamples)
+        pointer.deinitialize(count: allocCount)
+        pointer.deallocate()
     }
 }
 
@@ -124,16 +139,25 @@ public final class SampleBank {
         eventType: KeyEventType
     ) -> PCMBuffer? {
         cacheLock.lock()
+        if cache[pack] == nil {
+            cacheLock.unlock()
+            if let p = SoundPackManager.shared.availablePacks.first(where: { $0.id == pack }) {
+                loadPack(p)
+            } else if let fallback = SoundPackManager.shared.availablePacks.first {
+                loadPack(fallback)
+            }
+            cacheLock.lock()
+        }
         defer { cacheLock.unlock() }
 
-        guard let packMap = cache[pack] else { return nil }
-        guard let tierMap = packMap[tier] else { return nil }
-
-        // Fallback: if category specific sample not found, use alphanumeric
-        if let categoryMap = tierMap[category], let buf = categoryMap[eventType] {
-            return buf
+        if let packMap = cache[pack] ?? cache.values.first,
+           let tierMap = packMap[tier] ?? packMap[.medium] {
+            if let categoryMap = tierMap[category], let buf = categoryMap[eventType] {
+                return buf
+            }
+            return tierMap[.alphanumeric]?[eventType]
         }
-        return tierMap[.alphanumeric]?[eventType]
+        return nil
     }
 
     /// Returns the two crossfaded buffers and their respective calculated gains.
@@ -180,9 +204,10 @@ public final class SampleBank {
         if let res = Bundle.main.resourceURL {
             candidateURLs.append(res.appendingPathComponent("SoundPacks/\(pack.id)/\(filename).wav"))
             candidateURLs.append(res.appendingPathComponent("SoundPacks/Packs/\(pack.id)/\(filename).wav"))
-            // Fallback to medium tier if specific tier file is missing
             candidateURLs.append(res.appendingPathComponent("SoundPacks/\(pack.id)/medium_\(action)_\(suffix).wav"))
         }
+        candidateURLs.append(URL(fileURLWithPath: "/Applications/KeyVibe.app/Contents/Resources/SoundPacks/\(pack.id)/\(filename).wav"))
+        candidateURLs.append(URL(fileURLWithPath: "/Applications/KeyVibe.app/Contents/Resources/SoundPacks/\(pack.id)/medium_\(action)_\(suffix).wav"))
 
         for url in candidateURLs {
             if FileManager.default.fileExists(atPath: url.path) {

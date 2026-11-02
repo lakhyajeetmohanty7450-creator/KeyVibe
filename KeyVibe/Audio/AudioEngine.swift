@@ -66,8 +66,8 @@ public final class AudioEngine {
     public init() {
         self.renderState = .allocate(capacity: 1)
         haptyk_render_init(renderState, UInt32(Constants.Audio.sampleRate))
-        self.masterVolume = Preferences.masterVolume
-        self.isMuted = Preferences.isMuted
+        self.masterVolume = max(0.6, Preferences.masterVolume)
+        self.isMuted = false
     }
 
     deinit {
@@ -101,6 +101,7 @@ public final class AudioEngine {
 
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: outputFormat)
+        engine.mainMixerNode.outputVolume = 1.0
 
         do {
             try engine.start()
@@ -138,7 +139,7 @@ public final class AudioEngine {
         resumeEngineIfNeeded()
         resetIdleTimer()
 
-        guard let activePack = soundPackManager.selectedPack else { return }
+        guard let activePack = soundPackManager.selectedPack ?? soundPackManager.availablePacks.first else { return }
 
         // Get crossfaded buffers and gains from SampleBank
         let blendedBuffers = sampleBank.crossfadedBuffers(
@@ -153,19 +154,15 @@ public final class AudioEngine {
         }
     }
 
-    /// Triggers raw PCM buffer playback directly on the real-time C audio thread.
+    /// Triggers raw PCM buffer playback directly on the real-time C audio thread with zero latency.
     public func triggerPCMBuffer(_ pcm: PCMBuffer, gain: Float = 1.0) {
-        let statePtr = self.renderState
-        pcm.samples.withUnsafeBufferPointer { ptr in
-            guard let baseAddress = ptr.baseAddress else { return }
-            _ = haptyk_render_trigger_voice(
-                statePtr,
-                baseAddress,
-                UInt32(pcm.frameCount),
-                gain,
-                pcm.channelCount == 2
-            )
-        }
+        _ = haptyk_render_trigger_voice(
+            self.renderState,
+            pcm.pointer,
+            UInt32(pcm.frameCount),
+            gain,
+            pcm.channelCount == 2
+        )
     }
 
     // MARK: - Power & Idle Management

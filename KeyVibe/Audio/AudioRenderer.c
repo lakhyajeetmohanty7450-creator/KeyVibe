@@ -131,7 +131,7 @@ int haptyk_render_trigger_voice(HaptykRenderState *state,
     // This is the least disruptive choice for the listener.
     if (__builtin_expect(slotIndex == -1, 0)) {
         uint32_t maxPosition = 0;
-        int stealIndex = 0;
+        int stealIndex = -1;
         
         for (int i = 0; i < HAPTYK_MAX_VOICES; i++) {
             uint32_t pos = __atomic_load_n(&state->voices[i].playbackPosition,
@@ -140,6 +140,13 @@ int haptyk_render_trigger_voice(HaptykRenderState *state,
                 maxPosition = pos;
                 stealIndex = i;
             }
+        }
+        
+        // If all voices were triggered at the exact same frame (maxPosition == 0),
+        // use round-robin rather than always clobbering slot 0.
+        if (stealIndex == -1) {
+            static uint32_t rr = 0;
+            stealIndex = (rr++) % HAPTYK_MAX_VOICES;
         }
         
         // Deactivate the stolen voice before reconfiguring
@@ -181,20 +188,7 @@ OSStatus haptyk_render_callback(HaptykRenderState *state,
                                  uint32_t frameCount) {
     // --- Early exit: Muted ---
     // When muted, write silence and skip all voice processing.
-    // This saves significant CPU when the user has muted Haptyk.
     if (__builtin_expect(atomic_load_bool(&state->isMuted), 0)) {
-        for (uint32_t buf = 0; buf < outputData->mNumberBuffers; buf++) {
-            memset(outputData->mBuffers[buf].mData, 0,
-                   outputData->mBuffers[buf].mDataByteSize);
-        }
-        return noErr;
-    }
-    
-    // --- Early exit: No active voices ---
-    // Quick check before iterating the voice array. Even if a voice
-    // becomes active between this check and the loop, the worst case
-    // is one render cycle of silence — imperceptible.
-    if (__builtin_expect(atomic_load_i32(&state->activeVoiceCount) <= 0, 0)) {
         for (uint32_t buf = 0; buf < outputData->mNumberBuffers; buf++) {
             memset(outputData->mBuffers[buf].mData, 0,
                    outputData->mBuffers[buf].mDataByteSize);

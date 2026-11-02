@@ -167,10 +167,12 @@ public final class VelocityEngine {
             )
         }
 
-        // 1. Deliver to Audio Engine callback
+        // 1. Deliver to Audio Engine callback immediately (sub-millisecond latency)
         onVelocityResolved?(event, result)
 
-        // 2. Deliver to Labs features (AutoCAPS, Vine Boom, Metrics)
-        LabsManager.shared.processKeystroke(event: event, velocity: result)
+        // 2. Deliver to Labs features asynchronously so metrics never delay sound playback
+        DispatchQueue.global(qos: .utility).async {
+            LabsManager.shared.processKeystroke(event: event, velocity: result)
+        }
     }
 }

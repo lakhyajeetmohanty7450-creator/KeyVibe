@@ -26,9 +26,9 @@
 // MARK: - Constants
 
 /// Maximum number of simultaneous voice playback slots.
-/// 8 voices allows for overlapping press/release across rapid typing
-/// with crossfaded tier blending (2 voices per keystroke event).
-#define HAPTYK_MAX_VOICES 8
+/// 64 voices provides massive polyphony for simultaneous key presses,
+/// fast typing rolls, and overlapping press/release samples without voice stealing.
+#define HAPTYK_MAX_VOICES 64
 
 // MARK: - Voice State
 

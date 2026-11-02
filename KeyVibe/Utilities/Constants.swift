@@ -49,7 +49,7 @@ public enum Constants {
 
         /// Maximum number of overlapping voices (polyphony).
         /// Beyond this limit the oldest voice is stolen.
-        public static let maxSimultaneousVoices: Int = 8
+        public static let maxSimultaneousVoices: Int = 64
 
         /// Seconds of keyboard inactivity before the audio engine is
         /// suspended to save power. The engine resumes transparently

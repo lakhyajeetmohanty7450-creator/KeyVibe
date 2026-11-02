@@ -140,12 +140,15 @@ public final class KeyboardMonitor {
     /// Cocoa global monitor capturing events across all external applications.
     private var globalMonitor: Any?
 
+    /// Mach timestamp of the most recent event tap delivery to prevent duplicate audio.
+    public var lastEventTapTime: UInt64 = 0
+
     /// Deduplication cache to prevent dual-triggering if both CGEventTap and NSEvent monitor fire.
     private var lastKeyTimestamp: [Int64: UInt64] = [:]
     private let dedupeLock = NSLock()
 
     /// Logger scoped to the keyboard subsystem.
-    fileprivate let logger = Logger(subsystem: "com.haptyk.app", category: "KeyboardMonitor")
+    fileprivate let logger = Logger(subsystem: "com.keyvibe.app", category: "KeyboardMonitor")
 
     // MARK: Initializer
 
@@ -171,13 +174,21 @@ public final class KeyboardMonitor {
 
     // MARK: - Deduplication Helper
 
+    private static let debounceTicks: UInt64 = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        let nanosPerMach = Double(info.numer) / Double(info.denom)
+        // 5 ms debounce (protects against contact chatter without delaying simultaneous keys or fast rolls)
+        return UInt64(5_000_000.0 / nanosPerMach)
+    }()
+
     private func isDuplicate(keyCode: Int64, eventType: KeyEventType) -> Bool {
         let now = mach_absolute_time()
         dedupeLock.lock()
         defer { dedupeLock.unlock() }
         let key = (keyCode << 1) | (eventType == .keyDown ? 0 : 1)
         if let last = lastKeyTimestamp[key] {
-            if now > last && (now - last) < 20_000_000 { // 20ms debounce
+            if now > last && (now - last) < Self.debounceTicks {
                 return true
             }
         }
@@ -188,41 +199,27 @@ public final class KeyboardMonitor {
     // MARK: - Start / Stop
 
     /// Installs system-wide keystroke monitors across all applications.
-    func start() throws {
+    func start() {
         guard !isRunning else {
             logger.info("KeyboardMonitor is already running.")
             return
         }
 
-        // ── 1. Verify Accessibility ──────────────────────────────────────────
-        guard Self.checkAccessibilityPermission() else {
-            logger.error("Accessibility permission not granted.")
-            throw KeyboardMonitorError.accessibilityNotGranted
-        }
+        // ── 1. Install Cocoa Global Monitor (works across all external applications) ──
+        installGlobalMonitor()
 
-        // ── 2. Install Cocoa Global Monitor for all external applications ───
-        if globalMonitor == nil {
-            globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] nsEvent in
-                guard let self = self else { return }
-                let keyCode = Int64(nsEvent.keyCode)
-                let eventType: KeyEventType = (nsEvent.type == .keyDown) ? .keyDown : .keyUp
-                if !(nsEvent.isARepeat && eventType == .keyDown) {
-                    if !self.isDuplicate(keyCode: keyCode, eventType: eventType) {
-                        let category = KeyMapper.category(for: keyCode)
-                        let keyEvent = KeyEvent(
-                            keyCode: keyCode,
-                            eventType: eventType,
-                            timestamp: mach_absolute_time(),
-                            keyCategory: category,
-                            isRepeat: nsEvent.isARepeat
-                        )
-                        self.onKeyEvent?(keyEvent)
-                    }
-                }
-            }
-        }
+        // ── 2. Install high-speed Session / HID Event Tap if Accessibility is granted ─
+        installEventTap()
 
-        // ── 3. Create Session / HID Event Tap ───────────────────────────────
+        isRunning = true
+        logger.info("KeyboardMonitor started successfully.")
+    }
+
+    /// Installs or reinstalls the low-latency CGEventTap when Accessibility is granted.
+    public func installEventTap() {
+        guard eventTap == nil else { return }
+        guard Self.checkAccessibilityPermission() else { return }
+
         let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
                                    | (1 << CGEventType.keyUp.rawValue)
         let selfPointer = Unmanaged.passUnretained(self).toOpaque()
@@ -250,10 +247,37 @@ public final class KeyboardMonitor {
                 CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
             }
             CGEvent.tapEnable(tap: tap, enable: true)
+            logger.info("Low-latency CGEventTap successfully installed!")
         }
+    }
 
-        isRunning = true
-        logger.info("KeyboardMonitor started successfully across all applications.")
+    private func installGlobalMonitor() {
+        guard globalMonitor == nil else { return }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] nsEvent in
+            guard let self = self else { return }
+
+            // If CGEventTap already handled this event within the last 40ms, skip duplicate
+            let now = mach_absolute_time()
+            if self.lastEventTapTime > 0 && now > self.lastEventTapTime && (now - self.lastEventTapTime) < 40_000_000 {
+                return
+            }
+
+            let keyCode = Int64(nsEvent.keyCode)
+            let eventType: KeyEventType = (nsEvent.type == .keyDown) ? .keyDown : .keyUp
+            if !(nsEvent.isARepeat && eventType == .keyDown) {
+                if !self.isDuplicate(keyCode: keyCode, eventType: eventType) {
+                    let category = KeyMapper.category(for: keyCode)
+                    let keyEvent = KeyEvent(
+                        keyCode: keyCode,
+                        eventType: eventType,
+                        timestamp: now,
+                        keyCategory: category,
+                        isRepeat: nsEvent.isARepeat
+                    )
+                    self.onKeyEvent?(keyEvent)
+                }
+            }
+        }
     }
 
     /// Removes all event taps and monitors.
@@ -365,6 +389,7 @@ public final class KeyboardMonitor {
         }
 
         // ── Deliver to consumer ─────────────────────────────────────────
+        monitor.lastEventTapTime = preciseTimestamp
         monitor.onKeyEvent?(keyEvent)
 
         return Unmanaged.passUnretained(event)

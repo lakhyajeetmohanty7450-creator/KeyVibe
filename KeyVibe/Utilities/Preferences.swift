@@ -64,13 +64,14 @@ struct Preference<Value> {
         defaultValue: Value,
         defaults: UserDefaults = .standard
     ) {
-        let fullKey = "com.haptyk.\(key)"
+        let fullKey = "com.keyvibe.\(key)"
         self.key = fullKey
         self.defaultValue = defaultValue
         self.defaults = defaults
 
-        // Seed the subject with the current persisted value (or the default).
-        let initial = defaults.object(forKey: fullKey) as? Value ?? defaultValue
+        // Seed the subject with the current persisted value (or legacy key or default).
+        let legacyKey = "com.haptyk.\(key)"
+        let initial = (defaults.object(forKey: fullKey) ?? defaults.object(forKey: legacyKey)) as? Value ?? defaultValue
         self.subject = CurrentValueSubject<Value, Never>(initial)
     }
 
@@ -174,15 +175,20 @@ struct Preferences {
     /// **Call once** in `applicationDidFinishLaunching(_:)`.
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
+            "com.keyvibe.selectedSoundPack": "cherry-mx-blue",
+            "com.keyvibe.masterVolume": Float(0.8),
+            "com.keyvibe.sensitivity": Float(0.5),
+            "com.keyvibe.isMuted": false,
+            "com.keyvibe.autoCapsEnabled": false,
+            "com.keyvibe.vineBoomEnabled": false,
+            "com.keyvibe.typingMetricsEnabled": true,
+            "com.keyvibe.isFirstLaunch": true,
+            "com.keyvibe.hasCompletedOnboarding": false,
+            "keyvibe.isProUser": true,
             "com.haptyk.selectedSoundPack": "cherry-mx-blue",
             "com.haptyk.masterVolume": Float(0.8),
             "com.haptyk.sensitivity": Float(0.5),
             "com.haptyk.isMuted": false,
-            "com.haptyk.autoCapsEnabled": false,
-            "com.haptyk.vineBoomEnabled": false,
-            "com.haptyk.typingMetricsEnabled": true,
-            "com.haptyk.isFirstLaunch": true,
-            "com.haptyk.hasCompletedOnboarding": false,
             "haptyk.isProUser": true,
         ])
     }

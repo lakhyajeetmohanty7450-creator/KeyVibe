@@ -102,14 +102,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Step 3 — Accelerometer
         // -----------------------------------------------------------------
         log.info("Starting accelerometer stream…")
-        accelerometerManager = AccelerometerManager()
+        accelerometerManager = AccelerometerManager.shared
         accelerometerManager?.start()
 
         // -----------------------------------------------------------------
-        // Step 4 — Keyboard Monitor & Accessibility Auto-Reconnect
+        // Step 4 — Audio Engine & Sound Pack Pre-Loading
         // -----------------------------------------------------------------
-        log.info("Installing keyboard event tap…")
-        keyboardMonitor = KeyboardMonitor()
+        log.info("Starting audio engine…")
+        let engine = AudioEngine.shared
+        audioEngine = engine
+        engine.start()
+
+        let pack = SoundPackManager.shared.selectedPack ?? SoundPackManager.shared.availablePacks.first
+        if let pack = pack {
+            SoundPackManager.shared.selectedPack = pack
+            SampleBank.shared.loadPack(pack)
+        }
+
+        // -----------------------------------------------------------------
+        // Step 5 — Velocity Engine
+        // -----------------------------------------------------------------
+        log.info("Initialising velocity engine…")
+        let kbd = KeyboardMonitor.shared
+        keyboardMonitor = kbd
+        if let accel = accelerometerManager {
+            velocityEngine = VelocityEngine(
+                accelerometerManager: accel,
+                keyboardMonitor: kbd
+            )
+        }
+
+        // Wire Velocity Engine output directly to Audio Engine renderer
+        velocityEngine?.onVelocityResolved = { [weak self] event, velocity in
+            self?.audioEngine?.playKeySound(for: event, velocity: velocity)
+        }
+
+        // -----------------------------------------------------------------
+        // Step 6 — Keyboard Monitor & Accessibility Auto-Reconnect
+        // -----------------------------------------------------------------
+        log.info("Starting keyboard monitor across all applications…")
         checkAndStartKeyboardMonitor()
 
         // Poll every 1s so as soon as user enables toggle in System Settings, it activates
@@ -117,11 +148,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.checkAndStartKeyboardMonitor()
         }
 
-        // Local event monitor: guarantees typing sounds work inside Haptyk without any permissions
+        // Local event monitor: guarantees typing sounds work inside KeyVibe app window
         localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-            if self?.keyboardMonitor?.isRunning != true {
-                let keyCode = Int64(event.keyCode)
-                let eventType: KeyEventType = (event.type == .keyDown) ? .keyDown : .keyUp
+            guard let self = self else { return event }
+            let keyCode = Int64(event.keyCode)
+            let eventType: KeyEventType = (event.type == .keyDown) ? .keyDown : .keyUp
+            if !(event.isARepeat && eventType == .keyDown) {
                 let category = KeyMapper.category(for: keyCode)
                 let keyEvent = KeyEvent(
                     keyCode: keyCode,
@@ -130,37 +162,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     keyCategory: category,
                     isRepeat: event.isARepeat
                 )
-                self?.velocityEngine?.processKeyEvent(keyEvent)
+                self.velocityEngine?.processKeyEvent(keyEvent)
             }
             return event
-        }
-
-        // -----------------------------------------------------------------
-        // Step 5 — Velocity Engine
-        // -----------------------------------------------------------------
-        log.info("Initialising velocity engine…")
-        if let accel = accelerometerManager, let kbd = keyboardMonitor {
-            velocityEngine = VelocityEngine(
-                accelerometerManager: accel,
-                keyboardMonitor: kbd
-            )
-        }
-
-        // -----------------------------------------------------------------
-        // Step 6 — Audio Engine & Sound Pack
-        // -----------------------------------------------------------------
-        log.info("Starting audio engine…")
-        let engine = AudioEngine.shared
-        audioEngine = engine
-        engine.start()
-
-        if let pack = SoundPackManager.shared.selectedPack {
-            SampleBank.shared.loadPack(pack)
-        }
-
-        // Wire Velocity Engine output to Audio Engine renderer
-        velocityEngine?.onVelocityResolved = { [weak self] event, velocity in
-            self?.audioEngine?.playKeySound(for: event, velocity: velocity)
         }
 
         // -----------------------------------------------------------------
@@ -218,17 +222,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         log.info("Shutdown complete.")
     }
 
-    // MARK: - Accessibility Monitor Polling
+    // MARK: - Accessibility & Keyboard Monitor
 
     private func checkAndStartKeyboardMonitor() {
-        guard AXIsProcessTrusted() else { return }
         if keyboardMonitor?.isRunning != true {
-            do {
-                try keyboardMonitor?.start()
-                log.info("Accessibility granted! Global KeyboardMonitor started successfully.")
-            } catch {
-                log.warning("KeyboardMonitor start failed: \(error.localizedDescription)")
-            }
+            keyboardMonitor?.start()
+            log.info("Global KeyboardMonitor started across all applications.")
+        }
+        if AXIsProcessTrusted() {
+            keyboardMonitor?.installEventTap()
         }
     }
 

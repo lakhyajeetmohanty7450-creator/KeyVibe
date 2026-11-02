@@ -34,22 +34,12 @@ enum LogCategory: String {
     case licensing
 }
 
-// MARK: - HaptykLogger
+// MARK: - KeyVibeLogger
 
-/// A thin, zero-cost abstraction over `os_log` tailored for Haptyk.
-///
-/// Usage:
-/// ```swift
-/// private let log = HaptykLogger(category: .audio)
-/// log.debug("Buffer underrun detected at frame \(frame)")
-/// log.error("Failed to start audio engine: \(error)")
-/// ```
-///
-/// In **DEBUG** builds every log line includes the originating file name
-/// and line number so you can jump straight to the source in Xcode's
-/// console. In **RELEASE** builds this metadata is stripped to keep logs
-/// lean and avoid leaking internal paths.
-struct HaptykLogger {
+typealias HaptykLogger = KeyVibeLogger
+
+/// A thin, zero-cost abstraction over `os_log` tailored for KeyVibe.
+struct KeyVibeLogger {
 
     // MARK: - Properties
 

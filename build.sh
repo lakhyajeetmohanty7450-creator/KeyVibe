@@ -26,7 +26,7 @@ mkdir -p "$MODULE_CACHE"
 
 # 1. Compile C real-time Core Audio renderer
 echo "  [1/4] Compiling C real-time audio renderer (AudioRenderer.c)..."
-clang -c "$PROJECT_ROOT/Haptyk/Audio/AudioRenderer.c" \
+clang -c "$PROJECT_ROOT/KeyVibe/Audio/AudioRenderer.c" \
   -o "$BUILD_DIR/AudioRenderer.o" \
   -O3 \
   -std=c11 \
@@ -35,9 +35,9 @@ clang -c "$PROJECT_ROOT/Haptyk/Audio/AudioRenderer.c" \
 
 # 2. Compile Swift sources with Bridging Header
 echo "  [2/4] Compiling Swift application layers with sub-millisecond Core Audio graph..."
-find "$PROJECT_ROOT/Haptyk" -name "*.swift" -print0 | xargs -0 swiftc -parse-as-library \
+find "$PROJECT_ROOT/KeyVibe" -name "*.swift" -print0 | xargs -0 swiftc -parse-as-library \
   -module-cache-path "$MODULE_CACHE" \
-  -import-objc-header "$PROJECT_ROOT/Haptyk/Audio/Haptyk-Bridging-Header.h" \
+  -import-objc-header "$PROJECT_ROOT/KeyVibe/Audio/KeyVibe-Bridging-Header.h" \
   -framework AppKit \
   -framework SwiftUI \
   -framework IOKit \
@@ -52,13 +52,13 @@ find "$PROJECT_ROOT/Haptyk" -name "*.swift" -print0 | xargs -0 swiftc -parse-as-
 
 # 3. Bundle Resources & Info.plist
 echo "  [3/4] Packaging application bundle (KeyVibe.app)..."
-cp "$PROJECT_ROOT/Haptyk/App/Info.plist" "$CONTENTS_DIR/Info.plist"
+cp "$PROJECT_ROOT/KeyVibe/App/Info.plist" "$CONTENTS_DIR/Info.plist"
 
 # Copy sound pack directory structure
-if [ -d "$PROJECT_ROOT/Haptyk/SoundPacks/Packs" ]; then
+if [ -d "$PROJECT_ROOT/KeyVibe/SoundPacks/Packs" ]; then
     rm -rf "$RESOURCES_DIR/SoundPacks"
     mkdir -p "$RESOURCES_DIR/SoundPacks"
-    cp -R "$PROJECT_ROOT/Haptyk/SoundPacks/Packs/"* "$RESOURCES_DIR/SoundPacks/"
+    cp -R "$PROJECT_ROOT/KeyVibe/SoundPacks/Packs/"* "$RESOURCES_DIR/SoundPacks/"
 fi
 
 # 4. Code Sign with explicit Bundle Identifier
