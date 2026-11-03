@@ -31,6 +31,7 @@ clang -c "$PROJECT_ROOT/KeyVibe/Audio/AudioRenderer.c" \
   -O3 \
   -std=c11 \
   -arch arm64 \
+  -target arm64-apple-macos14.0 \
   -isysroot "$(xcrun --show-sdk-path)"
 
 # 2. Compile Swift sources with Bridging Header

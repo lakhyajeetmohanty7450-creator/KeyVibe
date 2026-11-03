@@ -101,7 +101,6 @@ public final class AudioEngine {
 
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: outputFormat)
-        engine.connect(engine.mainMixerNode, to: engine.outputNode, format: nil)
         engine.mainMixerNode.outputVolume = 1.0
 
         do {
@@ -156,8 +155,14 @@ public final class AudioEngine {
             eventType: event.eventType
         )
 
-        for (pcm, tierGain) in blendedBuffers {
-            triggerPCMBuffer(pcm, gain: tierGain)
+        if blendedBuffers.isEmpty {
+            if let fallbackBuf = sampleBank.buffer(pack: activePack.id, tier: .medium, category: event.keyCategory, eventType: event.eventType) {
+                triggerPCMBuffer(fallbackBuf, gain: 1.0)
+            }
+        } else {
+            for (pcm, tierGain) in blendedBuffers {
+                triggerPCMBuffer(pcm, gain: tierGain)
+            }
         }
     }
 

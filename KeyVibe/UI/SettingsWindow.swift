@@ -74,7 +74,7 @@ struct GeneralTab: View {
                     HStack {
                         Image(systemName: model.hasAccessibility ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                             .foregroundStyle(model.hasAccessibility ? .green : .red)
-                        Text("Accessibility Permission:")
+                        Text("System Keystroke Access:")
                         Spacer()
                         if model.hasAccessibility {
                             Text("Granted ✓").foregroundStyle(.green).fontWeight(.semibold)
@@ -86,15 +86,19 @@ struct GeneralTab: View {
                         }
                     }
 
-                    if !model.hasAccessibility {
+                    if model.hasAccessibility {
+                        Text("Hardware HID & System monitoring active across all applications.")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    } else {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("To hear typing sounds in other apps (VS Code, Word, Chrome):")
                                 .font(.caption)
                                 .fontWeight(.medium)
-                            Text("1. Click 'Grant Permission...' above (or open System Settings → Privacy & Security → Accessibility).")
+                            Text("1. Click 'Grant Permission...' above (or open System Settings → Privacy & Security).")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
-                            Text("2. Turn ON the toggle next to KeyVibe.")
+                            Text("2. Enable KeyVibe under 'Input Monitoring' / 'Device Control' or 'Accessibility'.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                             Text("3. If KeyVibe is not in the list, click the '+' button and select /Applications/KeyVibe.app.")

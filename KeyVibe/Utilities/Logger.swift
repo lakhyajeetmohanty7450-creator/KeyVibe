@@ -66,117 +66,105 @@ struct KeyVibeLogger {
 
     // MARK: - Logging Methods
 
+    private static let logFilePath = "/tmp/keyvibe.log"
+    private static func writeToFile(_ line: String) {
+        let entry = "\(Date()): \(line)\n"
+        if let data = entry.data(using: .utf8) {
+            if let fileHandle = FileHandle(forWritingAtPath: logFilePath) {
+                fileHandle.seekToEndOfFile()
+                fileHandle.write(data)
+                try? fileHandle.close()
+            } else {
+                try? data.write(to: URL(fileURLWithPath: logFilePath), options: .atomic)
+            }
+        }
+    }
+
     /// Logs a **debug**-level message.
-    ///
-    /// Debug messages are only captured when a log profile or Console.app
-    /// explicitly enables them.  In debug builds the file and line are
-    /// appended automatically.
-    ///
-    /// - Parameters:
-    ///   - message: A human-readable description of the event.
-    ///   - file:    Injected automatically — do not pass explicitly.
-    ///   - line:    Injected automatically — do not pass explicitly.
     func debug(
         _ message: @autoclosure () -> String,
         file: String = #fileID,
         line: Int = #line
     ) {
+        let msg = message()
+        Self.writeToFile("[\(category.rawValue)] [DEBUG] \(msg)")
         #if DEBUG
         os_log(
             .debug,
             log: osLog,
             "%{public}s [%{public}s:%{public}d]",
-            message(),
+            msg,
             abbreviatedFile(file),
             line
         )
         #else
-        os_log(.debug, log: osLog, "%{public}s", message())
+        os_log(.debug, log: osLog, "%{public}s", msg)
         #endif
     }
 
     /// Logs an **info**-level message.
-    ///
-    /// Info messages are persisted only when they occur close in time to
-    /// an error or fault, making them ideal for "breadcrumb" context.
-    ///
-    /// - Parameters:
-    ///   - message: A human-readable description of the event.
-    ///   - file:    Injected automatically — do not pass explicitly.
-    ///   - line:    Injected automatically — do not pass explicitly.
     func info(
         _ message: @autoclosure () -> String,
         file: String = #fileID,
         line: Int = #line
     ) {
+        let msg = message()
+        Self.writeToFile("[\(category.rawValue)] [INFO] \(msg)")
         #if DEBUG
         os_log(
             .info,
             log: osLog,
             "%{public}s [%{public}s:%{public}d]",
-            message(),
+            msg,
             abbreviatedFile(file),
             line
         )
         #else
-        os_log(.info, log: osLog, "%{public}s", message())
+        os_log(.info, log: osLog, "%{public}s", msg)
         #endif
     }
 
     /// Logs a **warning**-level message (maps to `OSLogType.default`).
-    ///
-    /// Warnings indicate unexpected-but-recoverable situations.  Apple's
-    /// Unified Logging has no explicit "warning" level so we use
-    /// `.default`, which is always persisted.
-    ///
-    /// - Parameters:
-    ///   - message: A human-readable description of the event.
-    ///   - file:    Injected automatically — do not pass explicitly.
-    ///   - line:    Injected automatically — do not pass explicitly.
     func warning(
         _ message: @autoclosure () -> String,
         file: String = #fileID,
         line: Int = #line
     ) {
+        let msg = message()
+        Self.writeToFile("[\(category.rawValue)] [WARN] \(msg)")
         #if DEBUG
         os_log(
             .default,
             log: osLog,
             "⚠️ %{public}s [%{public}s:%{public}d]",
-            message(),
+            msg,
             abbreviatedFile(file),
             line
         )
         #else
-        os_log(.default, log: osLog, "⚠️ %{public}s", message())
+        os_log(.default, log: osLog, "⚠️ %{public}s", msg)
         #endif
     }
 
     /// Logs an **error**-level message.
-    ///
-    /// Errors represent failures that disrupt functionality. These are
-    /// always persisted and surfaced prominently in Console.app.
-    ///
-    /// - Parameters:
-    ///   - message: A human-readable description of the error.
-    ///   - file:    Injected automatically — do not pass explicitly.
-    ///   - line:    Injected automatically — do not pass explicitly.
     func error(
         _ message: @autoclosure () -> String,
         file: String = #fileID,
         line: Int = #line
     ) {
+        let msg = message()
+        Self.writeToFile("[\(category.rawValue)] [ERROR] \(msg)")
         #if DEBUG
         os_log(
             .error,
             log: osLog,
             "❌ %{public}s [%{public}s:%{public}d]",
-            message(),
+            msg,
             abbreviatedFile(file),
             line
         )
         #else
-        os_log(.error, log: osLog, "❌ %{public}s", message())
+        os_log(.error, log: osLog, "❌ %{public}s", msg)
         #endif
     }
 

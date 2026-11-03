@@ -229,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyboardMonitor?.start()
             log.info("Global KeyboardMonitor started across all applications.")
         }
+        keyboardMonitor?.installHIDManager()
         keyboardMonitor?.installEventTap()
     }
 

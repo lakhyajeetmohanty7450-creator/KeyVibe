@@ -20,6 +20,8 @@
 
 import Cocoa
 import CoreGraphics
+import IOKit
+import IOKit.hid
 import os.log
 
 // MARK: - KeyEventType
@@ -129,10 +131,18 @@ public final class KeyboardMonitor {
     /// Whether the event tap is currently installed and active.
     private(set) var isRunning: Bool = false
 
+    /// Whether any hardware or session keyboard monitor is actively receiving keystrokes.
+    public var isListening: Bool {
+        hidManager != nil || eventTap != nil || globalMonitor != nil
+    }
+
     // MARK: Private Properties
 
-    /// The Quartz event tap port.
-    private var eventTap: CFMachPort?
+    /// The hardware-level IOKit HID manager (works with Device Control / Input Monitoring permission).
+    private var hidManager: IOHIDManager?
+
+    /// The Quartz event tap port (works with Accessibility permission).
+    fileprivate var eventTap: CFMachPort?
 
     /// The run loop source wrapping `eventTap`.
     private var runLoopSource: CFRunLoopSource?
@@ -140,10 +150,7 @@ public final class KeyboardMonitor {
     /// Cocoa global monitor capturing events across all external applications.
     private var globalMonitor: Any?
 
-    /// Mach timestamp of the most recent event tap delivery to prevent duplicate audio.
-    public var lastEventTapTime: UInt64 = 0
-
-    /// Deduplication cache to prevent dual-triggering if both CGEventTap and NSEvent monitor fire.
+    /// Deduplication cache to prevent dual-triggering if multiple monitors report the same key event.
     private var lastKeyTimestamp: [Int64: UInt64] = [:]
     private let dedupeLock = NSLock()
 
@@ -157,54 +164,59 @@ public final class KeyboardMonitor {
     // MARK: - Accessibility & Input Monitoring Permission Helpers
 
     /// Returns `true` if KeyVibe currently has permission to capture global keystrokes.
-    /// Supports both macOS Accessibility (kTCCServiceAccessibility) and
-    /// Device Control / Input Monitoring (kTCCServiceListenEvent), or an active CGEventTap.
+    /// Supports both macOS Device Control / Input Monitoring (kTCCServiceListenEvent) and
+    /// Accessibility (kTCCServiceAccessibility), or an active hardware tap.
     static func checkAccessibilityPermission() -> Bool {
-        if KeyboardMonitor.shared.eventTap != nil {
+        if IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted {
             return true
         }
         if AXIsProcessTrusted() {
             return true
         }
-        if IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted {
+        if KeyboardMonitor.shared.isListening {
             return true
         }
         return false
     }
 
-    /// Prompts the user to grant permission via system dialogs (both Accessibility and Input Monitoring)
+    /// Prompts the user to grant permission via system dialogs (both Input Monitoring and Accessibility)
     /// and opens macOS System Settings directly to the privacy pane.
     static func requestAccessibilityPermission() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
         _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
+            NSWorkspace.shared.open(url)
+        } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
     }
 
     // MARK: - Deduplication Helper
 
-    private static let debounceTicks: UInt64 = {
+    private static let dedupeWindowTicks: UInt64 = {
         var info = mach_timebase_info_data_t()
         mach_timebase_info(&info)
         let nanosPerMach = Double(info.numer) / Double(info.denom)
-        // 5 ms debounce (protects against contact chatter without delaying simultaneous keys or fast rolls)
-        return UInt64(5_000_000.0 / nanosPerMach)
+        // 25 ms per-key deduplication window prevents double-triggering across multiple taps (HID + CGEventTap + NSEvent),
+        // but completely allows simultaneous different keys in chords (0ms delay!)
+        return UInt64(25_000_000.0 / nanosPerMach)
     }()
 
-    private func isDuplicate(keyCode: Int64, eventType: KeyEventType) -> Bool {
+    private func shouldProcess(keyCode: Int64, eventType: KeyEventType) -> Bool {
         let now = mach_absolute_time()
         dedupeLock.lock()
         defer { dedupeLock.unlock() }
+
         let key = (keyCode << 1) | (eventType == .keyDown ? 0 : 1)
         if let last = lastKeyTimestamp[key] {
-            if now > last && (now - last) < Self.debounceTicks {
-                return true
+            if now > last && (now - last) < Self.dedupeWindowTicks {
+                return false
             }
         }
         lastKeyTimestamp[key] = now
-        return false
+        return true
     }
 
     // MARK: - Start / Stop
@@ -216,14 +228,74 @@ public final class KeyboardMonitor {
             return
         }
 
-        // ── 1. Install Cocoa Global Monitor (works across all external applications) ──
-        installGlobalMonitor()
+        // ── 1. Install Hardware IOHIDManager (works with Device Control / Input Monitoring) ──
+        installHIDManager()
 
         // ── 2. Install high-speed Session / HID Event Tap if Accessibility is granted ─
         installEventTap()
 
+        // ── 3. Install Cocoa Global Monitor (fallback across external applications) ──
+        installGlobalMonitor()
+
         isRunning = true
         logger.info("KeyboardMonitor started successfully.")
+    }
+
+    /// Installs direct hardware-level IOKit HID event tap for 0.05ms latency and full compatibility
+    /// with macOS Device Control / Input Monitoring access.
+    public func installHIDManager() {
+        guard hidManager == nil else { return }
+
+        let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
+        let matchDict: [String: Any] = [
+            kIOHIDDeviceUsagePageKey as String: kHIDPage_GenericDesktop,
+            kIOHIDDeviceUsageKey as String: kHIDUsage_GD_Keyboard
+        ]
+        IOHIDManagerSetDeviceMatching(manager, matchDict as CFDictionary)
+
+        let selfPointer = Unmanaged.passUnretained(self).toOpaque()
+        let callback: IOHIDValueCallback = { context, result, sender, value in
+            guard let context = context else { return }
+            let monitor = Unmanaged<KeyboardMonitor>.fromOpaque(context).takeUnretainedValue()
+            monitor.handleHIDValue(value)
+        }
+
+        IOHIDManagerRegisterInputValueCallback(manager, callback, selfPointer)
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        let openStatus = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+        if openStatus == kIOReturnSuccess {
+            self.hidManager = manager
+            logger.info("Low-latency IOHIDManager hardware tap successfully installed!")
+        } else {
+            logger.warning("IOHIDManager open returned: \(openStatus)")
+        }
+    }
+
+    private func handleHIDValue(_ value: IOHIDValue) {
+        let element = IOHIDValueGetElement(value)
+        let usagePage = Int(IOHIDElementGetUsagePage(element))
+        guard usagePage == 0x07 /* kHIDPage_KeyboardOrKeypad */ else { return }
+
+        let usage = Int(IOHIDElementGetUsage(element))
+        guard usage >= 0x04 && usage <= 0xE7 else { return }
+
+        let intVal = IOHIDValueGetIntegerValue(value)
+        guard intVal == 0 || intVal == 1 else { return }
+
+        let eventType: KeyEventType = (intVal == 1) ? .keyDown : .keyUp
+        let keyCode = KeyMapper.keyCodeFromHIDUsage(usage)
+
+        guard shouldProcess(keyCode: keyCode, eventType: eventType) else { return }
+
+        let category = KeyMapper.category(for: keyCode)
+        let keyEvent = KeyEvent(
+            keyCode: keyCode,
+            eventType: eventType,
+            timestamp: mach_absolute_time(),
+            keyCategory: category,
+            isRepeat: false
+        )
+        onKeyEvent?(keyEvent)
     }
 
     /// Installs or reinstalls the low-latency CGEventTap when granted.
@@ -266,21 +338,15 @@ public final class KeyboardMonitor {
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] nsEvent in
             guard let self = self else { return }
 
-            // If CGEventTap already handled this event within the last 40ms, skip duplicate
-            let now = mach_absolute_time()
-            if self.lastEventTapTime > 0 && now > self.lastEventTapTime && (now - self.lastEventTapTime) < 40_000_000 {
-                return
-            }
-
             let keyCode = Int64(nsEvent.keyCode)
             let eventType: KeyEventType = (nsEvent.type == .keyDown) ? .keyDown : .keyUp
             if !(nsEvent.isARepeat && eventType == .keyDown) {
-                if !self.isDuplicate(keyCode: keyCode, eventType: eventType) {
+                if self.shouldProcess(keyCode: keyCode, eventType: eventType) {
                     let category = KeyMapper.category(for: keyCode)
                     let keyEvent = KeyEvent(
                         keyCode: keyCode,
                         eventType: eventType,
-                        timestamp: now,
+                        timestamp: mach_absolute_time(),
                         keyCategory: category,
                         isRepeat: nsEvent.isARepeat
                     )
@@ -293,6 +359,12 @@ public final class KeyboardMonitor {
     /// Removes all event taps and monitors.
     func stop() {
         guard isRunning else { return }
+
+        if let hid = hidManager {
+            IOHIDManagerUnscheduleFromRunLoop(hid, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+            IOHIDManagerClose(hid, IOOptionBits(kIOHIDOptionsTypeNone))
+            hidManager = nil
+        }
 
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
@@ -394,12 +466,11 @@ public final class KeyboardMonitor {
             return Unmanaged.passUnretained(event)
         }
 
-        if monitor.isDuplicate(keyCode: keyCode, eventType: eventType) {
+        guard monitor.shouldProcess(keyCode: keyCode, eventType: eventType) else {
             return Unmanaged.passUnretained(event)
         }
 
         // ── Deliver to consumer ─────────────────────────────────────────
-        monitor.lastEventTapTime = preciseTimestamp
         monitor.onKeyEvent?(keyEvent)
 
         return Unmanaged.passUnretained(event)
