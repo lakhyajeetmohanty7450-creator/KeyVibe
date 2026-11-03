@@ -79,4 +79,3 @@ public struct SensitivityView: View {
         }
     }
 }
-

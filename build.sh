@@ -63,7 +63,7 @@ fi
 
 # 4. Code Sign with explicit Bundle Identifier
 echo "  [4/4] Ad-hoc code signing with identifier com.keyvibe.app..."
-codesign -s - --force --deep --identifier "com.keyvibe.app" "$APP_BUNDLE"
+codesign -s - --force --deep --identifier "com.keyvibe.app" -r="designated => identifier \"com.keyvibe.app\"" "$APP_BUNDLE"
 xattr -cr "$APP_BUNDLE"
 
 echo "✅ Build successful!"

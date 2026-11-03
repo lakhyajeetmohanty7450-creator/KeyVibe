@@ -154,22 +154,33 @@ public final class KeyboardMonitor {
 
     public init() {}
 
-    // MARK: - Accessibility Permission Helpers
+    // MARK: - Accessibility & Input Monitoring Permission Helpers
 
-    /// Returns `true` if Haptyk currently has Accessibility permission.
+    /// Returns `true` if KeyVibe currently has permission to capture global keystrokes.
+    /// Supports both macOS Accessibility (kTCCServiceAccessibility) and
+    /// Device Control / Input Monitoring (kTCCServiceListenEvent), or an active CGEventTap.
     static func checkAccessibilityPermission() -> Bool {
-        // Passing `false` only checks — does not prompt the user.
-        return AXIsProcessTrusted()
+        if KeyboardMonitor.shared.eventTap != nil {
+            return true
+        }
+        if AXIsProcessTrusted() {
+            return true
+        }
+        if IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted {
+            return true
+        }
+        return false
     }
 
-    /// Prompts the user to grant Accessibility permission via the system dialog.
-    ///
-    /// This opens System Settings to the Accessibility pane with Haptyk pre‐selected.
-    /// The prompt only appears once per app launch unless the user explicitly revokes
-    /// and re‐checks.
+    /// Prompts the user to grant permission via system dialogs (both Accessibility and Input Monitoring)
+    /// and opens macOS System Settings directly to the privacy pane.
     static func requestAccessibilityPermission() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
-        AXIsProcessTrustedWithOptions(options)
+        _ = AXIsProcessTrustedWithOptions(options)
+        _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     // MARK: - Deduplication Helper
@@ -215,10 +226,9 @@ public final class KeyboardMonitor {
         logger.info("KeyboardMonitor started successfully.")
     }
 
-    /// Installs or reinstalls the low-latency CGEventTap when Accessibility is granted.
+    /// Installs or reinstalls the low-latency CGEventTap when granted.
     public func installEventTap() {
         guard eventTap == nil else { return }
-        guard Self.checkAccessibilityPermission() else { return }
 
         let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
                                    | (1 << CGEventType.keyUp.rawValue)

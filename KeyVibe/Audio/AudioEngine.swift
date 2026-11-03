@@ -101,14 +101,15 @@ public final class AudioEngine {
 
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: outputFormat)
+        engine.connect(engine.mainMixerNode, to: engine.outputNode, format: nil)
         engine.mainMixerNode.outputVolume = 1.0
 
         do {
+            engine.prepare()
             try engine.start()
             self.audioEngine = engine
             self.sourceNode = node
             log.info("AudioEngine started successfully. Running on real-time IO thread.")
-            resetIdleTimer()
         } catch {
             log.error("Failed to start AVAudioEngine: \(error.localizedDescription)")
         }
@@ -135,9 +136,15 @@ public final class AudioEngine {
         // If muted or license prohibits playback, return immediately
         guard !isMuted else { return }
 
-        // Wake from idle sleep if suspended
-        resumeEngineIfNeeded()
-        resetIdleTimer()
+        // Ensure engine is running (auto-recover if audio device changed or woke from sleep)
+        if let engine = audioEngine, !engine.isRunning {
+            do {
+                engine.prepare()
+                try engine.start()
+            } catch {
+                log.error("Failed to recover AudioEngine: \(error.localizedDescription)")
+            }
+        }
 
         guard let activePack = soundPackManager.selectedPack ?? soundPackManager.availablePacks.first else { return }
 
@@ -165,33 +172,11 @@ public final class AudioEngine {
         )
     }
 
-    // MARK: - Power & Idle Management
-
-    private func resetIdleTimer() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.idleTimer?.invalidate()
-            self.idleTimer = Timer.scheduledTimer(withTimeInterval: self.idleTimeoutSeconds, repeats: false) { [weak self] _ in
-                self?.suspendEngineForIdle()
-            }
-        }
-    }
-
-    private func suspendEngineForIdle() {
-        guard let engine = audioEngine, engine.isRunning, !isEngineSuspended else { return }
-        log.info("Inactivity threshold reached (3 min). Suspending AudioEngine to conserve battery.")
-        engine.pause()
-        isEngineSuspended = true
-    }
-
-    private func resumeEngineIfNeeded() {
-        guard isEngineSuspended, let engine = audioEngine else { return }
-        log.info("Keystroke detected. Resuming AudioEngine from power-save sleep.")
-        do {
-            try engine.start()
-            isEngineSuspended = false
-        } catch {
-            log.error("Failed to resume AudioEngine: \(error.localizedDescription)")
+    /// Plays an instant acoustic sample for the active switch pack (used for UI previews and verification).
+    public func playTestSound() {
+        guard let activePack = soundPackManager.selectedPack ?? soundPackManager.availablePacks.first else { return }
+        if let buf = sampleBank.buffer(pack: activePack.id, tier: .medium, category: .alphanumeric, eventType: .keyDown) {
+            triggerPCMBuffer(buf, gain: 1.0)
         }
     }
 }

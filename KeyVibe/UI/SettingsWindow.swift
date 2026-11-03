@@ -43,28 +43,66 @@ public struct SettingsWindow: View {
     }
 }
 
+final class GeneralSettingsModel: ObservableObject {
+    @Published var hasAccessibility: Bool = KeyboardMonitor.checkAccessibilityPermission()
+    private var timer: Timer?
+
+    init() {
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            let current = KeyboardMonitor.checkAccessibilityPermission()
+            if self?.hasAccessibility != current {
+                self?.hasAccessibility = current
+            }
+        }
+    }
+
+    deinit {
+        timer?.invalidate()
+    }
+}
+
 // MARK: - General Tab
 
 struct GeneralTab: View {
-    @AppStorage("haptyk.launchAtLogin") private var launchAtLogin = false
-    private var hasAccessibility: Bool {
-        KeyboardMonitor.checkAccessibilityPermission()
-    }
+    @AppStorage("com.keyvibe.launchAtLogin") private var launchAtLogin = false
+    @ObservedObject private var model = GeneralSettingsModel()
 
     var body: some View {
         Form {
             Section("System Permissions") {
-                HStack {
-                    Image(systemName: hasAccessibility ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                        .foregroundStyle(hasAccessibility ? .green : .red)
-                    Text("Accessibility Permission:")
-                    Spacer()
-                    if hasAccessibility {
-                        Text("Granted").foregroundStyle(.secondary)
-                    } else {
-                        Button("Grant Permission...") {
-                            KeyboardMonitor.requestAccessibilityPermission()
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Image(systemName: model.hasAccessibility ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(model.hasAccessibility ? .green : .red)
+                        Text("Accessibility Permission:")
+                        Spacer()
+                        if model.hasAccessibility {
+                            Text("Granted ✓").foregroundStyle(.green).fontWeight(.semibold)
+                        } else {
+                            Button("Grant Permission...") {
+                                KeyboardMonitor.requestAccessibilityPermission()
+                            }
+                            .buttonStyle(.borderedProminent)
                         }
+                    }
+
+                    if !model.hasAccessibility {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("To hear typing sounds in other apps (VS Code, Word, Chrome):")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                            Text("1. Click 'Grant Permission...' above (or open System Settings → Privacy & Security → Accessibility).")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text("2. Turn ON the toggle next to KeyVibe.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text("3. If KeyVibe is not in the list, click the '+' button and select /Applications/KeyVibe.app.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(8)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
                     }
                 }
             }
@@ -101,8 +139,8 @@ struct GeneralTab: View {
 
 struct SoundTab: View {
     @ObservedObject var packManager = SoundPackManager.shared
-    @AppStorage("haptyk.volume") private var volume: Double = 0.75
-    @AppStorage("haptyk.isMuted") private var isMuted: Bool = false
+    @AppStorage("com.keyvibe.masterVolume") private var volume: Double = 0.8
+    @AppStorage("com.keyvibe.isMuted") private var isMuted: Bool = false
 
     var body: some View {
         Form {
@@ -137,7 +175,7 @@ struct SoundTab: View {
 // MARK: - Velocity Tab
 
 struct VelocityTab: View {
-    @AppStorage("haptyk.sensitivity") private var sensitivity: Double = 0.5
+    @AppStorage("com.keyvibe.sensitivity") private var sensitivity: Double = 0.5
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -192,9 +230,9 @@ struct TierBar: View {
 // MARK: - Labs Tab
 
 struct LabsTab: View {
-    @AppStorage("haptyk.autoCapsOnSlam") private var autoCaps = false
-    @AppStorage("haptyk.vineBoomMode") private var vineBoom = false
-    @AppStorage("haptyk.typingMetrics") private var metrics = true
+    @AppStorage("com.keyvibe.autoCapsEnabled") private var autoCaps = false
+    @AppStorage("com.keyvibe.vineBoomEnabled") private var vineBoom = false
+    @AppStorage("com.keyvibe.typingMetricsEnabled") private var metrics = true
 
     var body: some View {
         Form {

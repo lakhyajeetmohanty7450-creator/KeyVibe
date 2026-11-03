@@ -229,9 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyboardMonitor?.start()
             log.info("Global KeyboardMonitor started across all applications.")
         }
-        if AXIsProcessTrusted() {
-            keyboardMonitor?.installEventTap()
-        }
+        keyboardMonitor?.installEventTap()
     }
 
     // MARK: - Hardware Compatibility

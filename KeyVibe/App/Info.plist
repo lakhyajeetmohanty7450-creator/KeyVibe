@@ -30,6 +30,9 @@
     <key>NSAppleEventsUsageDescription</key>
     <string>KeyVibe needs Accessibility access to detect keystrokes so it can play authentic mechanical switch sounds across all applications.</string>
 
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>KeyVibe needs to detect keystroke timing and force to play realistic mechanical switch sounds in real-time across all applications.</string>
+
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
 

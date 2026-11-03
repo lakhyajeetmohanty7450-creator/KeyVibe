@@ -28,6 +28,7 @@ public final class SoundPackManager: ObservableObject {
             if let pack = selectedPack {
                 Preferences.selectedSoundPack = pack.id
                 SampleBank.shared.loadPack(pack)
+                AudioEngine.shared.playTestSound()
             }
         }
     }

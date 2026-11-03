@@ -9,5 +9,6 @@
 #define KeyVibe_Bridging_Header_h
 
 #import "AudioRenderer.h"
+#import <IOKit/hidsystem/IOHIDLib.h>
 
 #endif /* KeyVibe_Bridging_Header_h */
