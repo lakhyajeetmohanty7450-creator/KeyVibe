@@ -15,9 +15,9 @@
 //  ├──────────────────────────┼────────────┤
 //  │ M2+ MacBook Air/Pro      │ Full       │
 //  │ M1 MacBook Air/Pro 13"   │ Unsupported│
-//  │ Intel MacBooks            │ Unsupported│
+//  │ Intel MacBooks           │ Unsupported│
 //  │ iMac / Mac mini / Studio │ Unsupported│
-//  │ Mac Pro / Mac Pro Tower   │ Unsupported│
+//  │ Mac Pro / Mac Pro Tower  │ Unsupported│
 //  └──────────────────────────┴────────────┘
 //
 //  Created for the Haptyk project.
