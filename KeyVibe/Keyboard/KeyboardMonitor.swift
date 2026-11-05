@@ -197,9 +197,9 @@ public final class KeyboardMonitor {
         IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
     }
 
-    /// Returns `true` if KeyVibe currently has permission to capture global keystrokes across other apps.
+    /// Returns `true` only if both Accessibility and Input Monitoring permissions are active.
     public static func checkAccessibilityPermission() -> Bool {
-        hasAccessibilityPermission() || hasInputMonitoringPermission()
+        hasAccessibilityPermission() && hasInputMonitoringPermission()
     }
 
     /// Prompts the system permission dialog and opens System Settings -> Privacy & Security -> Accessibility.
@@ -280,11 +280,17 @@ public final class KeyboardMonitor {
         guard hidManager == nil else { return }
 
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-        let matchDict: [String: Any] = [
-            kIOHIDDeviceUsagePageKey as String: kHIDPage_GenericDesktop,
-            kIOHIDDeviceUsageKey as String: kHIDUsage_GD_Keyboard
+        let keyboardCriteria: [[String: Any]] = [
+            [
+                kIOHIDDeviceUsagePageKey as String: kHIDPage_GenericDesktop,
+                kIOHIDDeviceUsageKey as String: kHIDUsage_GD_Keyboard
+            ],
+            [
+                kIOHIDDeviceUsagePageKey as String: kHIDPage_GenericDesktop,
+                kIOHIDDeviceUsageKey as String: kHIDUsage_GD_Keypad
+            ]
         ]
-        IOHIDManagerSetDeviceMatching(manager, matchDict as CFDictionary)
+        IOHIDManagerSetDeviceMatchingMultiple(manager, keyboardCriteria as CFArray)
 
         let selfPointer = Unmanaged.passUnretained(self).toOpaque()
         let callback: IOHIDValueCallback = { context, result, sender, value in

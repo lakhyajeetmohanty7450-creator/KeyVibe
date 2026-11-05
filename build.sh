@@ -46,6 +46,7 @@ find "$PROJECT_ROOT/KeyVibe" -name "*.swift" -print0 | xargs -0 swiftc -parse-as
   -framework AudioToolbox \
   -framework Security \
   -framework ApplicationServices \
+  -framework ServiceManagement \
   -O \
   -target arm64-apple-macos14.0 \
   "$BUILD_DIR/AudioRenderer.o" \

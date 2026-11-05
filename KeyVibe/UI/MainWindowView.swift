@@ -34,6 +34,7 @@ public struct MainWindowView: View {
     @ObservedObject var metrics = TypingMetrics.shared
     @ObservedObject private var testModel = TestTypingModel()
     @ObservedObject private var permState = AccessibilityState.shared
+    @ObservedObject private var launchHelper = LaunchAtLoginHelper.shared
 
     public init() {}
 
@@ -88,20 +89,27 @@ public struct MainWindowView: View {
                         .foregroundStyle(.orange)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Accessibility Permission Required to Type in Other Apps")
+                        Text("Input Monitoring & Accessibility Permission Required")
                             .font(.subheadline)
                             .fontWeight(.bold)
-                        Text("To hear typing sounds in VS Code, Chrome, Word, Notes, and Terminal, enable KeyVibe in System Settings → Accessibility.")
+                        Text("To type in WhatsApp, Word, VS Code, and Chrome, enable KeyVibe in System Settings → Input Monitoring and Accessibility.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
 
                     Spacer()
 
-                    Button("Grant Permission...") {
-                        KeyboardMonitor.openAccessibilitySettings()
+                    HStack(spacing: 8) {
+                        Button("1. Input Monitoring") {
+                            KeyboardMonitor.openInputMonitoringSettings()
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("2. Accessibility") {
+                            KeyboardMonitor.openAccessibilitySettings()
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
                 .padding(10)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
@@ -255,6 +263,12 @@ public struct MainWindowView: View {
                 }
 
                 Spacer()
+
+                Toggle("Start at Login", isOn: Binding(
+                    get: { launchHelper.isEnabled },
+                    set: { launchHelper.setEnabled($0) }
+                ))
+                .font(.caption)
 
                 Button("Settings...") {
                     SettingsWindowController.shared.showWindow()

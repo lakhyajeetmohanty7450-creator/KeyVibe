@@ -118,6 +118,16 @@ struct GeneralTab: View {
                 }
             }
 
+            Section("Startup & Login") {
+                Toggle("Launch KeyVibe automatically when your Mac turns on", isOn: Binding(
+                    get: { LaunchAtLoginHelper.shared.isEnabled },
+                    set: { LaunchAtLoginHelper.shared.setEnabled($0) }
+                ))
+                Text("When enabled, KeyVibe starts silently in the background whenever you log into macOS.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Hardware Sensor Telemetry") {
                 let status = HardwareDetector.checkCompatibility()
                 HStack {

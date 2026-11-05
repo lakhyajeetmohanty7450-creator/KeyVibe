@@ -267,22 +267,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    // MARK: - Accessibility Permission
+    // MARK: - Permissions Management
 
-    /// Checks whether the process is trusted for Accessibility and, if not,
-    /// requests permission natively without blocking the main run loop.
+    /// Checks whether the process has both Accessibility and Input Monitoring permissions.
+    /// If either is missing, prompts macOS system authorization dialogs.
     private func requestAccessibilityPermissionIfNeeded() {
-        if !KeyboardMonitor.checkAccessibilityPermission() {
-            log.warning("Accessibility permission not yet granted — prompting system dialog.")
+        let hasA11y = KeyboardMonitor.hasAccessibilityPermission()
+        let hasInput = KeyboardMonitor.hasInputMonitoringPermission()
+        log.info("System permissions status: Accessibility=\(hasA11y), InputMonitoring=\(hasInput)")
+
+        if !hasA11y || !hasInput {
+            log.warning("Permissions missing (A11y=\(hasA11y), Input=\(hasInput)) — triggering system access requests.")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                let promptOptions: NSDictionary = [
-                    kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true
-                ]
-                _ = AXIsProcessTrustedWithOptions(promptOptions)
-                _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+                if !hasA11y {
+                    let promptOptions: NSDictionary = [
+                        kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true
+                    ]
+                    _ = AXIsProcessTrustedWithOptions(promptOptions)
+                }
+                if !hasInput {
+                    _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+                }
             }
         } else {
-            log.info("Accessibility permission already granted.")
+            log.info("Both Accessibility and Input Monitoring permissions confirmed granted.")
         }
     }
 }
