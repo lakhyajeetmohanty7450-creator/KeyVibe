@@ -33,6 +33,7 @@ public struct MainWindowView: View {
 
     @ObservedObject var metrics = TypingMetrics.shared
     @ObservedObject private var testModel = TestTypingModel()
+    @ObservedObject private var permState = AccessibilityState.shared
 
     public init() {}
 
@@ -67,9 +68,9 @@ public struct MainWindowView: View {
 
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(isMuted ? Color.orange : Color.green)
+                        .fill(isMuted ? Color.orange : (!permState.hasPermission ? Color.red : Color.green))
                         .frame(width: 8, height: 8)
-                    Text(isMuted ? "Muted" : "Active Across All Apps")
+                    Text(isMuted ? "Muted" : (!permState.hasPermission ? "Permission Needed" : "Active Across All Apps"))
                         .font(.caption2)
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)
@@ -77,6 +78,34 @@ public struct MainWindowView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(Capsule().fill(.quaternary))
+            }
+
+            // Permission Warning Banner if missing
+            if !permState.hasPermission {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.orange)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Accessibility Permission Required to Type in Other Apps")
+                            .font(.subheadline)
+                            .fontWeight(.bold)
+                        Text("To hear typing sounds in VS Code, Chrome, Word, Notes, and Terminal, enable KeyVibe in System Settings → Accessibility.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button("Grant Permission...") {
+                        KeyboardMonitor.openAccessibilitySettings()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.orange.opacity(0.35), lineWidth: 1))
             }
 
             // Feature Badges Banner
@@ -243,6 +272,17 @@ public struct MainWindowView: View {
         .onAppear {
             LabsManager.shared.autoCaps.isEnabled = autoCapsEnabled
             LabsManager.shared.vineBoom.isEnabled = vineBoomEnabled
+            AudioEngine.shared.masterVolume = Float(volume)
+            AudioEngine.shared.isMuted = isMuted
+            permState.refresh()
+        }
+        .onChange(of: isMuted) { _, val in
+            AudioEngine.shared.isMuted = val
+            Preferences.isMuted = val
+        }
+        .onChange(of: volume) { _, val in
+            AudioEngine.shared.masterVolume = Float(val)
+            Preferences.masterVolume = Float(val)
         }
     }
 

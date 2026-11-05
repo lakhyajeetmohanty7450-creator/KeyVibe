@@ -87,8 +87,8 @@ public struct KeyMapper {
     }
 
     /// Converts a USB HID Keyboard page usage code to a macOS virtual key code.
-    public static func keyCodeFromHIDUsage(_ usage: Int) -> Int64 {
-        return hidUsageToKeyCodeMap[usage] ?? 0x00
+    public static func keyCodeFromHIDUsage(_ usage: Int) -> Int64? {
+        return hidUsageToKeyCodeMap[usage]
     }
 
     /// Returns the filename suffix used in sound pack sample naming.

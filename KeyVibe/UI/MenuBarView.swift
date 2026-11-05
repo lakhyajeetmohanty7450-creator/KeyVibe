@@ -41,46 +41,77 @@ struct MenuBarView: View {
     // MARK: - State & Storage
 
     /// Current volume level (0.0–1.0).
-    @AppStorage("haptyk.volume") private var volume: Double = 0.75
+    @AppStorage("com.keyvibe.masterVolume") private var volume: Double = 0.8
 
     /// Current sensitivity value (0.0–1.0).
-    @AppStorage("haptyk.sensitivity") private var sensitivity: Double = 0.5
+    @AppStorage("com.keyvibe.sensitivity") private var sensitivity: Double = 0.5
 
     /// Whether sound output is muted.
-    @AppStorage("haptyk.isMuted") private var isMuted: Bool = false
+    @AppStorage("com.keyvibe.isMuted") private var isMuted: Bool = false
 
     /// Whether AutoCAPS on Slam is enabled.
-    @AppStorage("haptyk.autoCapsOnSlam") private var autoCapsOnSlam: Bool = false
+    @AppStorage("com.keyvibe.autoCapsEnabled") private var autoCapsOnSlam: Bool = false
 
     /// Whether Vine Boom Mode is enabled.
-    @AppStorage("haptyk.vineBoomMode") private var vineBoomMode: Bool = false
+    @AppStorage("com.keyvibe.vineBoomEnabled") private var vineBoomMode: Bool = false
 
     /// Whether typing metrics collection is active.
-    @AppStorage("haptyk.typingMetrics") private var typingMetricsEnabled: Bool = true
+    @AppStorage("com.keyvibe.typingMetrics") private var typingMetricsEnabled: Bool = true
 
     /// The identifier of the currently selected sound pack.
-    @AppStorage("haptyk.selectedSoundPack") private var selectedSoundPackID: String = "cherry-mx-blue"
+    @AppStorage("com.keyvibe.selectedSoundPack") private var selectedSoundPackID: String = "cherry-mx-blue"
 
     /// Whether the user has a Pro license.
-    @AppStorage("haptyk.isProUser") private var isProUser: Bool = true
+    @AppStorage("keyvibe.isProUser") private var isProUser: Bool = true
 
     /// Whether the Labs section is expanded.
-    @AppStorage("haptyk.isLabsExpanded") private var isLabsExpanded: Bool = false
+    @AppStorage("keyvibe.isLabsExpanded") private var isLabsExpanded: Bool = false
 
     /// Whether the app is actively monitoring keyboard input.
-    @AppStorage("haptyk.isListening") private var isListening: Bool = true
+    @AppStorage("keyvibe.isListening") private var isListening: Bool = true
 
     /// Today's total key press count (read from typing metrics).
-    @AppStorage("haptyk.todayKeyCount") private var todayKeyCount: Int = 0
+    @AppStorage("com.keyvibe.todayKeyCount") private var todayKeyCount: Int = 0
 
     /// Today's average force tier as a descriptive string.
-    @AppStorage("haptyk.todayAvgForce") private var todayAvgForce: String = "Medium"
+    @AppStorage("com.keyvibe.todayAvgForce") private var todayAvgForce: String = "Medium"
+
+    @ObservedObject private var permState = AccessibilityState.shared
 
     // MARK: - Body
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             headerSection
+
+            if !permState.hasPermission {
+                Button {
+                    KeyboardMonitor.openAccessibilitySettings()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Accessibility Needed")
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .foregroundStyle(.primary)
+                            Text("Click to enable typing in other apps")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.up.forward.app")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.orange.opacity(0.3), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+
             Divider()
             soundPackSection
             Divider()
@@ -125,8 +156,10 @@ struct MenuBarView: View {
     private var statusText: String {
         if isMuted {
             return "Muted"
+        } else if !permState.hasPermission {
+            return "Permission Required"
         } else if isListening {
-            return "Listening"
+            return "Listening Across Apps"
         } else {
             return "Paused"
         }
@@ -136,6 +169,8 @@ struct MenuBarView: View {
     private var statusColor: Color {
         if isMuted {
             return .orange
+        } else if !permState.hasPermission {
+            return .red
         } else if isListening {
             return .green
         } else {

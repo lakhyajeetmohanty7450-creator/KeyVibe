@@ -98,6 +98,29 @@ enum KeyboardMonitorError: LocalizedError {
     }
 }
 
+// MARK: - AccessibilityState Observable
+
+/// Shared reactive state for macOS permissions across all SwiftUI views.
+public final class AccessibilityState: ObservableObject {
+    public static let shared = AccessibilityState()
+
+    @Published public var hasPermission: Bool = KeyboardMonitor.checkAccessibilityPermission()
+    private var timer: Timer?
+
+    private init() {
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            let current = KeyboardMonitor.checkAccessibilityPermission()
+            if self?.hasPermission != current {
+                self?.hasPermission = current
+            }
+        }
+    }
+
+    public func refresh() {
+        hasPermission = KeyboardMonitor.checkAccessibilityPermission()
+    }
+}
+
 // MARK: - KeyboardMonitor
 
 /// Singleton that captures global keyboard events for velocity‐sensitive sound playback.
@@ -131,9 +154,9 @@ public final class KeyboardMonitor {
     /// Whether the event tap is currently installed and active.
     private(set) var isRunning: Bool = false
 
-    /// Whether any hardware or session keyboard monitor is actively receiving keystrokes.
+    /// Whether any hardware or session keyboard monitor is actively receiving keystrokes across applications.
     public var isListening: Bool {
-        hidManager != nil || eventTap != nil || globalMonitor != nil
+        eventTap != nil || (hidManager != nil && Self.hasInputMonitoringPermission())
     }
 
     // MARK: Private Properties
@@ -155,7 +178,8 @@ public final class KeyboardMonitor {
     private let dedupeLock = NSLock()
 
     /// Logger scoped to the keyboard subsystem.
-    fileprivate let logger = Logger(subsystem: "com.keyvibe.app", category: "KeyboardMonitor")
+    fileprivate let logger = HaptykLogger(category: .keyboard)
+    fileprivate static let staticLog = HaptykLogger(category: .keyboard)
 
     // MARK: Initializer
 
@@ -163,34 +187,43 @@ public final class KeyboardMonitor {
 
     // MARK: - Accessibility & Input Monitoring Permission Helpers
 
-    /// Returns `true` if KeyVibe currently has permission to capture global keystrokes.
-    /// Supports both macOS Device Control / Input Monitoring (kTCCServiceListenEvent) and
-    /// Accessibility (kTCCServiceAccessibility), or an active hardware tap.
-    static func checkAccessibilityPermission() -> Bool {
-        if IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted {
-            return true
-        }
-        if AXIsProcessTrusted() {
-            return true
-        }
-        if KeyboardMonitor.shared.isListening {
-            return true
-        }
-        return false
+    /// Checks if macOS Accessibility permission is granted (required for CGEventTap).
+    public static func hasAccessibilityPermission() -> Bool {
+        AXIsProcessTrusted()
     }
 
-    /// Prompts the user to grant permission via system dialogs (both Input Monitoring and Accessibility)
-    /// and opens macOS System Settings directly to the privacy pane.
-    static func requestAccessibilityPermission() {
+    /// Checks if macOS Input Monitoring permission is granted.
+    public static func hasInputMonitoringPermission() -> Bool {
+        IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+    }
+
+    /// Returns `true` if KeyVibe currently has permission to capture global keystrokes across other apps.
+    public static func checkAccessibilityPermission() -> Bool {
+        hasAccessibilityPermission() || hasInputMonitoringPermission()
+    }
+
+    /// Prompts the system permission dialog and opens System Settings -> Privacy & Security -> Accessibility.
+    public static func openAccessibilitySettings() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
+
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Prompts the system permission dialog and opens System Settings -> Privacy & Security -> Input Monitoring.
+    public static func openInputMonitoringSettings() {
         _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
 
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
             NSWorkspace.shared.open(url)
-        } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
         }
+    }
+
+    /// Legacy convenience helper.
+    public static func requestAccessibilityPermission() {
+        openAccessibilitySettings()
     }
 
     // MARK: - Deduplication Helper
@@ -283,7 +316,7 @@ public final class KeyboardMonitor {
         guard intVal == 0 || intVal == 1 else { return }
 
         let eventType: KeyEventType = (intVal == 1) ? .keyDown : .keyUp
-        let keyCode = KeyMapper.keyCodeFromHIDUsage(usage)
+        guard let keyCode = KeyMapper.keyCodeFromHIDUsage(usage) else { return }
 
         guard shouldProcess(keyCode: keyCode, eventType: eventType) else { return }
 
@@ -302,44 +335,95 @@ public final class KeyboardMonitor {
     public func installEventTap() {
         guard eventTap == nil else { return }
 
+        let trusted = AXIsProcessTrusted()
+        logger.info("installEventTap: AXIsProcessTrusted = \(trusted)")
+
         let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
                                    | (1 << CGEventType.keyUp.rawValue)
+                                   | (1 << CGEventType.flagsChanged.rawValue)
         let selfPointer = Unmanaged.passUnretained(self).toOpaque()
 
-        let tap = CGEvent.tapCreate(
+        var tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .listenOnly,
-            eventsOfInterest: eventMask,
-            callback: KeyboardMonitor.eventTapCallback,
-            userInfo: selfPointer
-        ) ?? CGEvent.tapCreate(
-            tap: .cghidEventTap,
-            place: .headInsertEventTap,
-            options: .listenOnly,
+            options: .defaultTap,
             eventsOfInterest: eventMask,
             callback: KeyboardMonitor.eventTapCallback,
             userInfo: selfPointer
         )
+        if tap != nil {
+            logger.info("Created tap at .cgSessionEventTap (defaultTap)")
+        } else {
+            tap = CGEvent.tapCreate(
+                tap: .cgSessionEventTap,
+                place: .headInsertEventTap,
+                options: .listenOnly,
+                eventsOfInterest: eventMask,
+                callback: KeyboardMonitor.eventTapCallback,
+                userInfo: selfPointer
+            )
+            if tap != nil {
+                logger.info("Created tap at .cgSessionEventTap (listenOnly)")
+            } else {
+                tap = CGEvent.tapCreate(
+                    tap: .cgAnnotatedSessionEventTap,
+                    place: .headInsertEventTap,
+                    options: .listenOnly,
+                    eventsOfInterest: eventMask,
+                    callback: KeyboardMonitor.eventTapCallback,
+                    userInfo: selfPointer
+                )
+                if tap != nil {
+                    logger.info("Created tap at .cgAnnotatedSessionEventTap")
+                } else {
+                    tap = CGEvent.tapCreate(
+                        tap: .cghidEventTap,
+                        place: .headInsertEventTap,
+                        options: .listenOnly,
+                        eventsOfInterest: eventMask,
+                        callback: KeyboardMonitor.eventTapCallback,
+                        userInfo: selfPointer
+                    )
+                    if tap != nil {
+                        logger.info("Created tap at .cghidEventTap")
+                    } else {
+                        logger.error("All CGEvent.tapCreate attempts failed! AXIsProcessTrusted=\(trusted)")
+                    }
+                }
+            }
+        }
 
         if let tap = tap {
             eventTap = tap
             if let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) {
                 runLoopSource = source
                 CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+                CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
             }
             CGEvent.tapEnable(tap: tap, enable: true)
-            logger.info("Low-latency CGEventTap successfully installed!")
+            logger.info("Low-latency CGEventTap successfully installed and enabled!")
         }
     }
 
-    private func installGlobalMonitor() {
+    public func installGlobalMonitor() {
         guard globalMonitor == nil else { return }
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] nsEvent in
+        logger.info("Installing Cocoa globalMonitor for external applications...")
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] nsEvent in
             guard let self = self else { return }
 
             let keyCode = Int64(nsEvent.keyCode)
-            let eventType: KeyEventType = (nsEvent.type == .keyDown) ? .keyDown : .keyUp
+            let eventType: KeyEventType
+            if nsEvent.type == .keyDown {
+                eventType = .keyDown
+            } else if nsEvent.type == .keyUp {
+                eventType = .keyUp
+            } else {
+                let isPressed = !nsEvent.modifierFlags.intersection([.shift, .control, .option, .command, .capsLock]).isEmpty
+                eventType = isPressed ? .keyDown : .keyUp
+            }
+
+            self.logger.info("globalMonitor captured: keyCode=\(keyCode), type=\(eventType.rawValue)")
+
             if !(nsEvent.isARepeat && eventType == .keyDown) {
                 if self.shouldProcess(keyCode: keyCode, eventType: eventType) {
                     let category = KeyMapper.category(for: keyCode)
@@ -353,6 +437,17 @@ public final class KeyboardMonitor {
                     self.onKeyEvent?(keyEvent)
                 }
             }
+        }
+        logger.info("Cocoa globalMonitor successfully installed.")
+    }
+
+    public func reinstallGlobalMonitorIfNeeded() {
+        if eventTap == nil && globalMonitor != nil {
+            if let m = globalMonitor {
+                NSEvent.removeMonitor(m)
+                globalMonitor = nil
+            }
+            installGlobalMonitor()
         }
     }
 
@@ -429,16 +524,12 @@ public final class KeyboardMonitor {
             return Unmanaged.passUnretained(event)
         }
 
-        // ── Only process keyDown and keyUp ───────────────────────────────
-        guard type == .keyDown || type == .keyUp else {
+        // ── Only process keyDown, keyUp, and flagsChanged ────────────────
+        guard type == .keyDown || type == .keyUp || type == .flagsChanged else {
             return Unmanaged.passUnretained(event)
         }
 
         // ── Detect auto‐repeat ──────────────────────────────────────────
-        //
-        // Field `keyboardEventAutorepeat` is non‐zero for OS‐generated repeat
-        // events. We still build a KeyEvent (with isRepeat = true) so the
-        // consumer can decide, but the default behaviour is to skip repeats.
         let autoRepeatValue = event.getIntegerValueField(.keyboardEventAutorepeat)
         let isRepeat = autoRepeatValue != 0
 
@@ -446,7 +537,15 @@ public final class KeyboardMonitor {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
         // ── Map to event type and key category ──────────────────────────
-        let eventType: KeyEventType = (type == .keyDown) ? .keyDown : .keyUp
+        let eventType: KeyEventType
+        if type == .keyDown {
+            eventType = .keyDown
+        } else if type == .keyUp {
+            eventType = .keyUp
+        } else {
+            let hasFlags = !event.flags.intersection([.maskShift, .maskControl, .maskAlternate, .maskCommand, .maskAlphaShift]).isEmpty
+            eventType = hasFlags ? .keyDown : .keyUp
+        }
         let keyCategory = KeyMapper.category(for: keyCode)
 
         // ── Build the KeyEvent ──────────────────────────────────────────
@@ -457,6 +556,8 @@ public final class KeyboardMonitor {
             keyCategory: keyCategory,
             isRepeat: isRepeat
         )
+
+        KeyboardMonitor.staticLog.info("eventTapCallback captured: keyCode=\(keyCode), type=\(eventType.rawValue)")
 
         // ── Filter auto‐repeats for sound triggering ────────────────────
         //
@@ -471,6 +572,7 @@ public final class KeyboardMonitor {
         }
 
         // ── Deliver to consumer ─────────────────────────────────────────
+        monitor.logger.info("eventTapCallback delivering keyEvent: keyCode=\(keyCode), category=\(keyCategory.rawValue)")
         monitor.onKeyEvent?(keyEvent)
 
         return Unmanaged.passUnretained(event)

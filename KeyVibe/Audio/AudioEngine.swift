@@ -146,6 +146,7 @@ public final class AudioEngine {
         }
 
         guard let activePack = soundPackManager.selectedPack ?? soundPackManager.availablePacks.first else { return }
+        log.info("AudioEngine playKeySound: keyCode=\(event.keyCode), category=\(event.keyCategory.rawValue), pack=\(activePack.id)")
 
         // Get crossfaded buffers and gains from SampleBank
         let blendedBuffers = sampleBank.crossfadedBuffers(
@@ -180,6 +181,7 @@ public final class AudioEngine {
     /// Plays an instant acoustic sample for the active switch pack (used for UI previews and verification).
     public func playTestSound() {
         guard let activePack = soundPackManager.selectedPack ?? soundPackManager.availablePacks.first else { return }
+        log.info("AudioEngine playTestSound: pack=\(activePack.id)")
         if let buf = sampleBank.buffer(pack: activePack.id, tier: .medium, category: .alphanumeric, eventType: .keyDown) {
             triggerPCMBuffer(buf, gain: 1.0)
         }

@@ -47,6 +47,8 @@ public struct VolumeSliderView: View {
             HStack(spacing: 8) {
                 Button {
                     isMuted.toggle()
+                    AudioEngine.shared.isMuted = isMuted
+                    Preferences.isMuted = isMuted
                 } label: {
                     Image(systemName: speakerIcon)
                         .font(.body)
@@ -63,6 +65,11 @@ public struct VolumeSliderView: View {
                 .onChange(of: volume) { newValue in
                     onVolumeChanged?(newValue)
                     AudioEngine.shared.masterVolume = newValue
+                    Preferences.masterVolume = newValue
+                }
+                .onChange(of: isMuted) { newMuted in
+                    AudioEngine.shared.isMuted = newMuted
+                    Preferences.isMuted = newMuted
                 }
             }
         }

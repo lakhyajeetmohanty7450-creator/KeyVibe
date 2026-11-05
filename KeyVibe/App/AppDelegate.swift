@@ -125,15 +125,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         log.info("Initialising velocity engine…")
         let kbd = KeyboardMonitor.shared
         keyboardMonitor = kbd
-        if let accel = accelerometerManager {
-            velocityEngine = VelocityEngine(
-                accelerometerManager: accel,
-                keyboardMonitor: kbd
-            )
-        }
+        let vEngine = VelocityEngine(
+            accelerometerManager: accelerometerManager ?? .shared,
+            keyboardMonitor: kbd
+        )
+        velocityEngine = vEngine
 
         // Wire Velocity Engine output directly to Audio Engine renderer
-        velocityEngine?.onVelocityResolved = { [weak self] event, velocity in
+        vEngine.onVelocityResolved = { [weak self] event, velocity in
             self?.audioEngine?.playKeySound(for: event, velocity: velocity)
         }
 
@@ -231,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         keyboardMonitor?.installHIDManager()
         keyboardMonitor?.installEventTap()
+        keyboardMonitor?.reinstallGlobalMonitorIfNeeded()
     }
 
     // MARK: - Hardware Compatibility
@@ -272,13 +272,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Checks whether the process is trusted for Accessibility and, if not,
     /// requests permission natively without blocking the main run loop.
     private func requestAccessibilityPermissionIfNeeded() {
-        if !AXIsProcessTrusted() {
+        if !KeyboardMonitor.checkAccessibilityPermission() {
             log.warning("Accessibility permission not yet granted — prompting system dialog.")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 let promptOptions: NSDictionary = [
                     kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true
                 ]
                 _ = AXIsProcessTrustedWithOptions(promptOptions)
+                _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
             }
         } else {
             log.info("Accessibility permission already granted.")

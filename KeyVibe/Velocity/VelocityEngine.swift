@@ -168,6 +168,7 @@ public final class VelocityEngine {
         }
 
         // 1. Deliver to Audio Engine callback immediately (sub-millisecond latency)
+        log.info("VelocityEngine resolved: \(event.keyCode), category: \(event.keyCategory.rawValue), tier: \(result.forceTier.displayName)")
         onVelocityResolved?(event, result)
 
         // 2. Deliver to Labs features asynchronously so metrics never delay sound playback

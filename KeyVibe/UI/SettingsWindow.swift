@@ -79,10 +79,17 @@ struct GeneralTab: View {
                         if model.hasAccessibility {
                             Text("Granted ✓").foregroundStyle(.green).fontWeight(.semibold)
                         } else {
-                            Button("Grant Permission...") {
-                                KeyboardMonitor.requestAccessibilityPermission()
+                            HStack(spacing: 8) {
+                                Button("Open Accessibility...") {
+                                    KeyboardMonitor.openAccessibilitySettings()
+                                }
+                                .buttonStyle(.borderedProminent)
+
+                                Button("Input Monitoring...") {
+                                    KeyboardMonitor.openInputMonitoringSettings()
+                                }
+                                .buttonStyle(.bordered)
                             }
-                            .buttonStyle(.borderedProminent)
                         }
                     }
 
